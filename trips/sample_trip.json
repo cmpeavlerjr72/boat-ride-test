@@ -1,0 +1,21 @@
+{
+  "trip_id": "poc-coastal-run",
+  "boat": {
+    "name": "22ft Center Console",
+    "length_ft": 22,
+    "beam_ft": 8.5,
+    "draft_ft": 1.2,
+    "comfort_bias": 0.0,
+    "max_safe_wind_kt": 25,
+    "max_safe_wave_ft": 4.0
+  },
+  "route": [
+    { "lat": 30.3935, "lon": -88.8853 },
+    { "lat": 30.3610, "lon": -88.7980 },
+    { "lat": 30.3350, "lon": -88.7200 }
+  ],
+  "start_time_local": "2026-01-22 08:00",
+  "end_time_local": "2026-01-22 12:00",
+  "sample_every_minutes": 20,
+  "cruise_speed_kt": 18.0
+}

@@ -1,0 +1,28 @@
+{
+  "trip_id": "halfmoon_to_stcatherines_inland",
+  "boat": {
+    "name": "POC Boat",
+    "length_ft": 22,
+    "beam_ft": 8.5,
+    "draft_ft": 1.5,
+    "comfort_bias": 0.0,
+    "max_safe_wind_kt": 25,
+    "max_safe_wave_ft": 4.0
+  },
+  "route": [
+    { "name": "Halfmoon Marina (Midway, GA)", "lat": 31.695083, "lon": -81.271267, "fetch_nm": 0.6, "waterway": "inland" },
+    { "name": "Medway River / ICW bend",        "lat": 31.687900, "lon": -81.251500, "fetch_nm": 0.8, "waterway": "inland" },
+    { "name": "Bear River reach",              "lat": 31.680000, "lon": -81.231500, "fetch_nm": 0.9, "waterway": "inland" },
+    { "name": "Walburg Creek area",            "lat": 31.670200, "lon": -81.210500, "fetch_nm": 0.8, "waterway": "inland" },
+    { "name": "Approach to St Catherines Sound","lat": 31.658800, "lon": -81.188000, "fetch_nm": 1.2, "waterway": "inland" },
+    { "name": "St Catherines Sound (mid)",     "lat": 31.645800, "lon": -81.170000, "fetch_nm": 1.8, "waterway": "inland" },
+    { "name": "West of St Catherines Island",  "lat": 31.636000, "lon": -81.158500, "fetch_nm": 2.0, "waterway": "inland" },
+    { "name": "St Catherines Island (target)", "lat": 31.628887, "lon": -81.152698, "fetch_nm": 2.0, "waterway": "inland" }
+  ],
+  "start_time_local": "2026-01-27 08:00",
+  "end_time_local": "2026-01-27 12:00",
+  "sample_every_minutes": 20,
+  "cruise_speed_kt": 18.0,
+  "timezone": "America/New_York",
+  "default_fetch_nm": 1.0
+}

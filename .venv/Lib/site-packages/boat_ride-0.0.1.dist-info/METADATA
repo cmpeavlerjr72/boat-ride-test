@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: boat-ride
+Version: 0.0.1
+Requires-Python: >=3.10
+Requires-Dist: pydantic>=2.5
+Requires-Dist: pydantic-settings>=2.0
+Requires-Dist: rich>=13.0
+Requires-Dist: numpy>=1.26
+Requires-Dist: requests>=2.31
