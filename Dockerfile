@@ -2,13 +2,15 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Install dependencies first (layer caching)
-COPY pyproject.toml .
-RUN pip install --no-cache-dir .
+ENV BOAT_RIDE_DATA_DIR=/app/data
 
-# Copy source
+# Install dependencies first (layer caching)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy source and install package
+COPY pyproject.toml .
 COPY src/ src/
-COPY trips/ trips/
 RUN pip install --no-cache-dir -e .
 
 # Pre-download coastline shapefile into the image so first request isn't slow
@@ -16,4 +18,4 @@ RUN python -c "from boat_ride.geo.shoreline import ShorelineData; ShorelineData.
 
 EXPOSE 10000
 
-CMD ["uvicorn", "boat_ride.api:app", "--host", "0.0.0.0", "--port", "10000"]
+CMD ["gunicorn", "boat_ride.api:app", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:10000", "--timeout", "120"]

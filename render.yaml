@@ -2,8 +2,5 @@ services:
   - type: web
     name: boat-ride-api
     runtime: docker
-    plan: free
+    plan: starter
     healthCheckPath: /health
-    envVars:
-      - key: BOAT_RIDE_DATA_DIR
-        value: /app/data
