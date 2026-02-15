@@ -13,6 +13,7 @@ class NormalizedPoint:
     cum_dist_m: float
     seg_dist_m: float
     bearing_deg_true: float  # maps to env.meta["route_heading_deg"]
+    waterway: Optional[str] = None  # "inland" / "coastal" / "offshore"
 
 
 @dataclass(frozen=True)

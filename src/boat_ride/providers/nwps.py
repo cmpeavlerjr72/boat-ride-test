@@ -1,22 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from boat_ride.core.models import TripPlan, EnvAtPoint
 from boat_ride.providers.http import HTTPClient
 
 
-def _parse_local(dt_str: str) -> datetime:
-    return datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
-
-
 @dataclass
 class NWPSProvider:
     """
     Nearshore Wave Prediction System (NWPS) – gridded nearshore waves.
-    Not wired yet: this implementation is a safe stub that will not crash.
+
+    TODO: Wire up real NWPS data. NWPS provides high-resolution nearshore wave
+    forecasts from NOAA/NWS WFOs. The eventual implementation should:
+      - Resolve the correct WFO / NWPS region from lat/lon
+      - Fetch the relevant GRIB2 or OPeNDAP slice for (Hs, Tp, Dir)
+      - Interpolate to route points and sample times
+    Currently a safe stub that returns empty wave fields without crashing.
     """
 
     user_agent: str = "boat-ride-poc (contact: you@example.com)"
@@ -33,16 +34,11 @@ class NWPSProvider:
         raise NotImplementedError("NWPSProvider not wired yet")
 
     def get_env_series(self, plan: TripPlan) -> List[EnvAtPoint]:
-        start = _parse_local(plan.start_time_local)
-        end = _parse_local(plan.end_time_local)
-        step = timedelta(minutes=plan.sample_every_minutes)
-
+        times = plan.sample_times
         out: List[EnvAtPoint] = []
-        t = start
-        idx = 0
         npts = max(1, len(plan.route))
 
-        while t <= end:
+        for idx, t in enumerate(times):
             p = plan.route[min(idx, npts - 1)]
 
             endpoint = self._lookup_nwps_endpoint(p.lat, p.lon)
@@ -78,8 +74,5 @@ class NWPSProvider:
                     meta=meta,
                 )
             )
-
-            t += step
-            idx += 1
 
         return out

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import math
 import xml.etree.ElementTree as ET
@@ -17,9 +17,9 @@ from requests.exceptions import ReadTimeout, ConnectionError
 
 
 
-def _parse_local(dt_str: str) -> datetime:
-    # Same as your other providers: naive "local" time for now.
-    return datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+def _parse_local(dt_str: str, tz_name: Optional[str] = None) -> datetime:
+    from boat_ride.core.models import _parse_local as _pl
+    return _pl(dt_str, tz_name)
 
 
 def _haversine_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -168,13 +168,13 @@ class NDBCWaveProvider(EnvProvider):
         return None
 
     def _parse_station_waves_nearest_time(
-        self, station_txt: str, t_local_naive: datetime
+        self, station_txt: str, t_local: datetime
     ) -> tuple[Optional[float], Optional[float], Optional[float], Optional[datetime]]:
         """
         Returns (wave_height_ft, dominant_period_s, mean_wave_dir_deg, obs_dt).
 
-        Note: NDBC timestamps in these files are typically UTC; for POC we
-        match by 'nearest timestamp ignoring tz' like we did with NWS.
+        NDBC timestamps are UTC. We construct UTC-aware datetimes and compare
+        against the (potentially aware) sample time.
         """
         lines = [ln.strip() for ln in station_txt.splitlines() if ln.strip()]
         if len(lines) < 3:
@@ -227,7 +227,7 @@ class NDBCWaveProvider(EnvProvider):
                     # 2-digit year mapping
                     year = 2000 + yy_raw if yy_raw < 70 else 1900 + yy_raw
 
-                dt = datetime(year, mm, dd, hh, minute)
+                dt = datetime(year, mm, dd, hh, minute, tzinfo=timezone.utc)
 
                 # values can be "MM"
                 def parse_float(p: str) -> Optional[float]:
@@ -245,8 +245,14 @@ class NDBCWaveProvider(EnvProvider):
                 period_s = dpd_s if dpd_s is not None else apd_s
                 mwd_deg = parse_float(parts[i_mwd]) if i_mwd is not None else None
 
-                # nearest time (naive)
-                abs_sec = abs((dt - t_local_naive).total_seconds())
+                # Compare aware datetimes; strip tz if mismatched
+                cmp_dt = dt
+                cmp_tl = t_local
+                if cmp_dt.tzinfo is not None and cmp_tl.tzinfo is None:
+                    cmp_dt = cmp_dt.replace(tzinfo=None)
+                elif cmp_dt.tzinfo is None and cmp_tl.tzinfo is not None:
+                    cmp_tl = cmp_tl.replace(tzinfo=None)
+                abs_sec = abs((cmp_dt - cmp_tl).total_seconds())
                 if abs_sec < best_abs:
                     best_abs = abs_sec
                     best_dt = dt
@@ -260,16 +266,11 @@ class NDBCWaveProvider(EnvProvider):
 
 
     def get_env_series(self, plan: TripPlan) -> list[EnvAtPoint]:
-        start = _parse_local(plan.start_time_local)
-        end = _parse_local(plan.end_time_local)
-        step = timedelta(minutes=plan.sample_every_minutes)
-
+        times = plan.sample_times
         out: list[EnvAtPoint] = []
-        t = start
-        idx = 0
         npts = max(1, len(plan.route))
 
-        while t <= end:
+        for idx, t in enumerate(times):
             p = plan.route[min(idx, npts - 1)]
 
             station_pick = self._pick_nearest_station(p.lat, p.lon)
@@ -312,8 +313,5 @@ class NDBCWaveProvider(EnvProvider):
                     meta=meta,
                 )
             )
-
-            t += step
-            idx += 1
 
         return out

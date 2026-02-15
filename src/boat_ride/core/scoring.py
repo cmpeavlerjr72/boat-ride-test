@@ -287,6 +287,9 @@ def score_point(boat: BoatProfile, env: EnvAtPoint) -> RideScore:
     )
     detail = {k: v for k, v in detail.items() if v is not None}
 
+    # Filter non-serializable internal keys from providers meta
+    providers_meta = {k: v for k, v in meta.items() if not k.startswith("_")}
+
     return RideScore(
         t_local=env.t_local,
         lat=env.lat,
@@ -298,6 +301,6 @@ def score_point(boat: BoatProfile, env: EnvAtPoint) -> RideScore:
             **detail,
             "wave_source": wave_source,
             "fetch_nm": meta.get("fetch_nm"),
-            "providers": meta,
+            "providers": providers_meta,
         },
     )

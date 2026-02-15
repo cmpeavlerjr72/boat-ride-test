@@ -11,8 +11,9 @@ from boat_ride.core.models import TripPlan, EnvAtPoint
 from boat_ride.providers.base import EnvProvider
 
 
-def _parse_local(dt_str: str) -> datetime:
-    return datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+def _parse_local(dt_str: str, tz_name: Optional[str] = None) -> datetime:
+    from boat_ride.core.models import _parse_local as _pl
+    return _pl(dt_str, tz_name)
 
 
 def _haversine_nm(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -152,9 +153,9 @@ class COOPSTideProvider(EnvProvider):
 
     # ---------- Tide fetch ----------
 
-    def _fetch_tides(self, station_id: str, begin: datetime, end: datetime) -> Tuple[List[datetime], List[float], Dict[str, Any]]:
+    def _fetch_tides(self, station_id: str, begin: datetime, end: datetime, tz_name: Optional[str] = None) -> Tuple[List[datetime], List[float], Dict[str, Any]]:
         """
-        Fetch reminded tide predictions from CO-OPS Data API.
+        Fetch tide predictions from CO-OPS Data API.
         """
         cache_key = f"{station_id}:{begin.strftime('%Y%m%d%H%M')}:{end.strftime('%Y%m%d%H%M')}:{self.product}:{self.datum}:{self.units}:{self.timezone}:{self.interval}"
         if cache_key in self._tide_cache:
@@ -189,8 +190,12 @@ class COOPSTideProvider(EnvProvider):
                 vstr = row.get("v")
                 if tstr is None or vstr is None:
                     continue
-                # CO-OPS returns local timestamps if time_zone=lst_ldt; format often "YYYY-MM-DD HH:MM"
+                # CO-OPS returns local timestamps if time_zone=lst_ldt
                 t = datetime.strptime(tstr, "%Y-%m-%d %H:%M")
+                # Attach trip timezone since CO-OPS lst_ldt data is local
+                if tz_name:
+                    from zoneinfo import ZoneInfo
+                    t = t.replace(tzinfo=ZoneInfo(tz_name))
                 v = float(vstr)
                 ts.append(t)
                 vs.append(v)
@@ -215,9 +220,8 @@ class COOPSTideProvider(EnvProvider):
     # ---------- Provider output ----------
 
     def get_env_series(self, plan: TripPlan) -> List[EnvAtPoint]:
-        start = _parse_local(plan.start_time_local) - timedelta(hours=self.padding_hours)
-        end = _parse_local(plan.end_time_local) + timedelta(hours=self.padding_hours)
-        step = timedelta(minutes=plan.sample_every_minutes)
+        start = _parse_local(plan.start_time_local, plan.timezone) - timedelta(hours=self.padding_hours)
+        end = _parse_local(plan.end_time_local, plan.timezone) + timedelta(hours=self.padding_hours)
 
         # If the trip has a fixed station, use it. Otherwise, choose a station per point.
         # (Phase 1 simplification: pick station by trip centroid so tide is consistent along route.)
@@ -246,18 +250,17 @@ class COOPSTideProvider(EnvProvider):
                 "coops_station_distance_nm": station_dist,
             }
             try:
-                ts, vs, fetch_meta = self._fetch_tides(station.id, start, end)
+                ts, vs, fetch_meta = self._fetch_tides(station.id, start, end, tz_name=plan.timezone)
             except Exception as e:
                 fetch_meta = {"coops_error": f"{type(e).__name__}: {e}"}
         else:
             fetch_meta = {"coops_error": "No CO-OPS stations available"}
 
         out: List[EnvAtPoint] = []
-        t = _parse_local(plan.start_time_local)
-        idx = 0
+        times = plan.sample_times
         npts = max(1, len(plan.route))
 
-        while t <= _parse_local(plan.end_time_local):
+        for idx, t in enumerate(times):
             p = plan.route[min(idx, npts - 1)]
 
             tide_ft = _linear_interp(ts, vs, t) if ts and vs else None
@@ -296,8 +299,5 @@ class COOPSTideProvider(EnvProvider):
                     meta=meta,
                 )
             )
-
-            t += step
-            idx += 1
 
         return out

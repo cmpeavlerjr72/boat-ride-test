@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional, Tuple
+from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 
-def _parse_local(dt_str: str) -> datetime:
-    # naive local time for the POC
-    return datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+def _parse_local(dt_str: str, tz_name: Optional[str] = None) -> datetime:
+    """Parse a local time string, optionally attaching a timezone.
+
+    When *tz_name* is provided (e.g. ``"America/New_York"``), the returned
+    datetime is timezone-aware.  Otherwise it is naive (POC compat).
+    """
+    dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+    if tz_name:
+        dt = dt.replace(tzinfo=ZoneInfo(tz_name))
+    return dt
 
 
 class BoatProfile(BaseModel):
@@ -53,6 +61,9 @@ class TripPlan(BaseModel):
     timezone: str = "America/New_York"
     default_fetch_nm: float = 1.0
 
+    # Computed normalized route (attached by engine before running providers)
+    _normalized_route: Any = PrivateAttr(default=None)
+
     # ---- Compatibility properties (fixes your NWPS/COOPS/fetch errors) ----
     @property
     def route_points(self) -> List[RoutePoint]:
@@ -60,8 +71,8 @@ class TripPlan(BaseModel):
 
     @property
     def sample_times(self) -> List[datetime]:
-        start = _parse_local(self.start_time_local)
-        end = _parse_local(self.end_time_local)
+        start = _parse_local(self.start_time_local, self.timezone)
+        end = _parse_local(self.end_time_local, self.timezone)
         step = timedelta(minutes=self.sample_every_minutes)
         out: List[datetime] = []
         t = start

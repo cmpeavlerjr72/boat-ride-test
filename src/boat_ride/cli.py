@@ -25,7 +25,7 @@ def _save_json(path: Path, obj) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--provider", default="nws+ndbc", help="e.g. nws+ndbc or nws+nwps+coops+ndbc")
+    ap.add_argument("--provider", default="nws+ndbc+fetch+coops", help="e.g. nws+ndbc+fetch+coops")
     ap.add_argument("--trip", default="trips/sample_trip.json", help="Path to a trip JSON file")
     ap.add_argument("--debug", action="store_true")
     args = ap.parse_args()

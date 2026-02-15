@@ -6,6 +6,11 @@ from boat_ride.core.models import EnvAtPoint, TripPlan
 
 from boat_ride.providers.waves_inland import InlandWaveInputs, compute_inland_waves
 
+try:
+    from boat_ride.geo.fetch_calculator import effective_fetch_nm as _effective_fetch
+except ImportError:
+    _effective_fetch = None
+
 
 
 def _compute_fetch_chop(wind_kt: float, fetch_nm: float) -> tuple[float, float]:
@@ -147,5 +152,16 @@ class ChainProvider:
                 )
 
             series = merged
+
+        # Post-merge: if we have _fetch_result and wind direction, compute
+        # effective (SPM-weighted) fetch and update fetch_nm in meta
+        if _effective_fetch is not None:
+            for env in series:
+                fr = (env.meta or {}).get("_fetch_result")
+                wd = env.wind_dir_deg
+                if fr is not None and wd is not None:
+                    eff = _effective_fetch(fr, wd)
+                    env.meta["fetch_nm"] = eff
+                    env.meta["fetch_effective_method"] = "spm_weighted"
 
         return series

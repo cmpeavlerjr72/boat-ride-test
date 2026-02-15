@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
 from typing import List
 
 from boat_ride.core.models import TripPlan, EnvAtPoint
 from boat_ride.providers.http import HTTPClient
 
 
-def _parse_local(dt_str: str) -> datetime:
-    return datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
-
-
 @dataclass
 class USACEProvider:
     """
     USACE river gauges / flow / stage (where accessible).
-    Safe stub that won't crash.
+
+    TODO: Wire up real USACE data. The eventual implementation should:
+      - Query USACE RiverGages API or CWMS for nearby gauges
+      - Fetch stage (ft), discharge (cfs), and flow velocity if available
+      - Provide river current estimates useful for inland route scoring
+    Currently a safe stub that returns empty environmental fields without crashing.
     """
 
     user_agent: str = "boat-ride-poc (contact: you@example.com)"
@@ -25,16 +25,11 @@ class USACEProvider:
         self.http = HTTPClient(user_agent=self.user_agent)
 
     def get_env_series(self, plan: TripPlan) -> List[EnvAtPoint]:
-        start = _parse_local(plan.start_time_local)
-        end = _parse_local(plan.end_time_local)
-        step = timedelta(minutes=plan.sample_every_minutes)
-
+        times = plan.sample_times
         out: List[EnvAtPoint] = []
-        t = start
-        idx = 0
         npts = max(1, len(plan.route))
 
-        while t <= end:
+        for idx, t in enumerate(times):
             p = plan.route[min(idx, npts - 1)]
             out.append(
                 EnvAtPoint(
@@ -54,7 +49,5 @@ class USACEProvider:
                     meta={"water_source": "usace", "usace_note": "not wired yet"},
                 )
             )
-            t += step
-            idx += 1
 
         return out

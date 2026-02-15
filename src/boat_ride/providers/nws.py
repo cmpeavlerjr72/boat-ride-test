@@ -13,8 +13,9 @@ from boat_ride.core.models import TripPlan, EnvAtPoint
 from boat_ride.providers.base import EnvProvider
 
 
-def _parse_local(dt_str: str) -> datetime:
-    return datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+def _parse_local(dt_str: str, tz_name: Optional[str] = None) -> datetime:
+    from boat_ride.core.models import _parse_local as _pl
+    return _pl(dt_str, tz_name)
 
 
 def _parse_iso(dt: str) -> datetime:
@@ -180,10 +181,20 @@ class NWSProvider(EnvProvider):
         self._hourly_cache[forecast_hourly_url] = periods
         return periods
 
-    def _pick_hourly(self, periods: list[_HourlyPeriod], t_local_naive: datetime) -> Optional[_HourlyPeriod]:
+    def _pick_hourly(self, periods: list[_HourlyPeriod], t_local: datetime) -> Optional[_HourlyPeriod]:
         if not periods:
             return None
-        return min(periods, key=lambda p: abs((p.start.replace(tzinfo=None) - t_local_naive).total_seconds()))
+        # NWS forecastHourly returns ISO8601 with offsets, so p.start is aware.
+        # Make both sides comparable by stripping tz if needed.
+        def _delta(p: _HourlyPeriod) -> float:
+            ps = p.start
+            tl = t_local
+            if ps.tzinfo is not None and tl.tzinfo is None:
+                ps = ps.replace(tzinfo=None)
+            elif ps.tzinfo is None and tl.tzinfo is not None:
+                tl = tl.replace(tzinfo=None)
+            return abs((ps - tl).total_seconds())
+        return min(periods, key=_delta)
 
     # ---------- Grid data fallback path ----------
 
@@ -252,29 +263,30 @@ class NWSProvider(EnvProvider):
 
         return _GridSeries(times=times, values=vals)
 
-    def _nearest_from_series(self, series: _GridSeries, t_local_naive: datetime) -> Optional[float]:
+    def _nearest_from_series(self, series: _GridSeries, t_local: datetime) -> Optional[float]:
         if not series.times:
             return None
-        # Compare in naive space to avoid TZ headaches for now
-        idx = min(
-            range(len(series.times)),
-            key=lambda i: abs((series.times[i].replace(tzinfo=None) - t_local_naive).total_seconds()),
-        )
+
+        def _delta(i: int) -> float:
+            st = series.times[i]
+            tl = t_local
+            if st.tzinfo is not None and tl.tzinfo is None:
+                st = st.replace(tzinfo=None)
+            elif st.tzinfo is None and tl.tzinfo is not None:
+                tl = tl.replace(tzinfo=None)
+            return abs((st - tl).total_seconds())
+
+        idx = min(range(len(series.times)), key=_delta)
         return series.values[idx]
 
     # ---------- Public API ----------
 
     def get_env_series(self, plan: TripPlan) -> list[EnvAtPoint]:
-        start = _parse_local(plan.start_time_local)
-        end = _parse_local(plan.end_time_local)
-        step = timedelta(minutes=plan.sample_every_minutes)
-
+        times = plan.sample_times
         out: list[EnvAtPoint] = []
-        t = start
-        idx = 0
         npts = max(1, len(plan.route))
 
-        while t <= end:
+        for idx, t in enumerate(times):
             p = plan.route[min(idx, npts - 1)]
 
             props = self._points_properties(p.lat, p.lon)
@@ -338,9 +350,5 @@ class NWSProvider(EnvProvider):
                     meta=meta,
                 )
             )
-
-
-            t += step
-            idx += 1
 
         return out
