@@ -4,3 +4,27 @@ services:
     runtime: docker
     plan: starter
     healthCheckPath: /health
+    envVars:
+      - key: BOAT_RIDE_REDIS_URL
+        fromService:
+          name: boat-ride-redis
+          type: keyvalue
+          property: connectionString
+
+  - type: worker
+    name: boat-ride-worker
+    runtime: docker
+    plan: starter
+    dockerCommand: python -m boat_ride.worker
+    envVars:
+      - key: BOAT_RIDE_REDIS_URL
+        fromService:
+          name: boat-ride-redis
+          type: keyvalue
+          property: connectionString
+
+  - type: keyvalue
+    name: boat-ride-redis
+    plan: starter
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []

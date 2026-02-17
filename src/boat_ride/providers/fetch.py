@@ -52,24 +52,51 @@ class FetchChopProvider:
 
     def _precompute_fetch(self, plan: TripPlan) -> None:
         """Compute dynamic fetch for all route points lacking manual fetch_nm."""
+        from boat_ride.cache.redis_client import cache_get_json, cache_set_json
+        from boat_ride.cache.keys import fetch_result as _rkey
+        from boat_ride.config import settings
+        from boat_ride.geo.fetch_calculator import FetchResult
+
         calc = self._get_calculator()
-        if calc is None:
-            return
 
         points_to_compute = []
         indices = []
         for i, rp in enumerate(plan.route):
-            if rp.fetch_nm is None:
-                points_to_compute.append((rp.lat, rp.lon))
-                indices.append(i)
+            if rp.fetch_nm is not None:
+                continue
+            ck = f"{rp.lat:.6f},{rp.lon:.6f}"
+            # Already in L1
+            if ck in self._fetch_cache:
+                continue
+            # Try L2
+            rk = _rkey(rp.lat, rp.lon)
+            cached = cache_get_json(rk)
+            if cached is not None:
+                self._fetch_cache[ck] = FetchResult(
+                    direction_fetch_nm={float(k): v for k, v in cached["direction_fetch_nm"].items()},
+                    min_fetch_nm=cached["min_fetch_nm"],
+                    max_fetch_nm=cached["max_fetch_nm"],
+                    waterway=cached["waterway"],
+                )
+                continue
+            # Need live computation
+            points_to_compute.append((rp.lat, rp.lon))
+            indices.append(i)
 
-        if not points_to_compute:
+        if not points_to_compute or calc is None:
             return
 
         results = calc.compute_fetch_batch(points_to_compute)
         for idx, result in zip(indices, results):
             cache_key = f"{plan.route[idx].lat:.6f},{plan.route[idx].lon:.6f}"
             self._fetch_cache[cache_key] = result
+            rk = _rkey(plan.route[idx].lat, plan.route[idx].lon)
+            cache_set_json(rk, {
+                "direction_fetch_nm": {str(k): v for k, v in result.direction_fetch_nm.items()},
+                "min_fetch_nm": result.min_fetch_nm,
+                "max_fetch_nm": result.max_fetch_nm,
+                "waterway": result.waterway,
+            }, settings.ttl_fetch_result)
 
     def _get_fetch_nm(self, route_point, plan: Optional[TripPlan] = None) -> float:
         # Manual override takes priority

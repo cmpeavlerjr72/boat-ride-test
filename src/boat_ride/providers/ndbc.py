@@ -92,6 +92,24 @@ class NDBCWaveProvider(EnvProvider):
         if self._stations is not None:
             return self._stations
 
+        # L2: Redis
+        from boat_ride.cache.redis_client import cache_get_json, cache_set_json
+        from boat_ride.cache.keys import ndbc_stations as _rkey
+        from boat_ride.config import settings
+        rk = _rkey()
+        cached = cache_get_json(rk)
+        if cached is not None:
+            self._stations = [
+                Station(
+                    station_id=d["station_id"],
+                    lat=d["lat"],
+                    lon=d["lon"],
+                    name=d.get("name", ""),
+                )
+                for d in cached
+            ]
+            return self._stations
+
         r = self.s.get(self.ACTIVE_XML, timeout=25)
         r.raise_for_status()
         xml_text = r.text
@@ -118,17 +136,32 @@ class NDBCWaveProvider(EnvProvider):
                 continue
 
         self._stations = stations
+        cache_set_json(rk, [
+            {"station_id": s.station_id, "lat": s.lat, "lon": s.lon, "name": s.name}
+            for s in stations
+        ], settings.ttl_ndbc_stations)
         return stations
 
     def _get_station_txt(self, station: str) -> Optional[str]:
         if station in self._station_file_cache:
             return self._station_file_cache[station]
 
+        # L2: Redis
+        from boat_ride.cache.redis_client import cache_get_text, cache_set_text
+        from boat_ride.cache.keys import ndbc_realtime as _rkey
+        from boat_ride.config import settings
+        rk = _rkey(station)
+        cached = cache_get_text(rk)
+        if cached is not None:
+            self._station_file_cache[station] = cached
+            return cached
+
         url = self.REALTIME_TXT.format(station=station)
         txt = self._get_text(url, timeout=25, tries=4, backoff_s=0.8)
         if txt is None:
             return None
         self._station_file_cache[station] = txt
+        cache_set_text(rk, txt, settings.ttl_ndbc_realtime)
         return txt
 
 
@@ -138,32 +171,53 @@ class NDBCWaveProvider(EnvProvider):
         # Sort by distance; try closest first
         ranked = sorted(stations, key=lambda s: _haversine_nm(lat, lon, s.lat, s.lon))
 
+        # L2 imports (used inside loop)
+        from boat_ride.cache.redis_client import cache_get_json, cache_set_json
+        from boat_ride.cache.keys import ndbc_has_waves as _rkey
+        from boat_ride.config import settings
+
         for s in ranked[:50]:  # avoid scanning thousands
             d = _haversine_nm(lat, lon, s.lat, s.lon)
             if d > max_nm:
                 break
 
-            # If we already know whether it has waves, use that
-            if s.station_id in self._station_has_waves and not self._station_has_waves[s.station_id]:
-                continue
+            # If we already know whether it has waves, use that (L1)
+            if s.station_id in self._station_has_waves:
+                if not self._station_has_waves[s.station_id]:
+                    continue
+                else:
+                    return (s.station_id, d)
+
+            # Check L2
+            rk = _rkey(s.station_id)
+            l2 = cache_get_json(rk)
+            if l2 is not None:
+                self._station_has_waves[s.station_id] = l2
+                if not l2:
+                    continue
+                else:
+                    return (s.station_id, d)
 
             txt = self._get_station_txt(s.station_id)
             if not txt:
                 self._station_has_waves[s.station_id] = False
+                cache_set_json(rk, False, settings.ttl_ndbc_has_waves)
                 continue
 
             lines = [ln.strip() for ln in txt.splitlines() if ln.strip()]
             if len(lines) < 3:
                 self._station_has_waves[s.station_id] = False
+                cache_set_json(rk, False, settings.ttl_ndbc_has_waves)
                 continue
 
             header = lines[0].lstrip("#").split()
             if "WVHT" in header:
                 self._station_has_waves[s.station_id] = True
+                cache_set_json(rk, True, settings.ttl_ndbc_has_waves)
                 return (s.station_id, d)
 
-
             self._station_has_waves[s.station_id] = False
+            cache_set_json(rk, False, settings.ttl_ndbc_has_waves)
 
         return None
 

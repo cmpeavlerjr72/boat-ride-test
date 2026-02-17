@@ -122,6 +122,19 @@ class COOPSTideProvider(EnvProvider):
         if self._stations is not None:
             return self._stations
 
+        # L2: Redis
+        from boat_ride.cache.redis_client import cache_get_json, cache_set_json
+        from boat_ride.cache.keys import coops_stations as _rkey
+        from boat_ride.config import settings
+        rk = _rkey()
+        cached = cache_get_json(rk)
+        if cached is not None:
+            self._stations = [
+                CoopStation(id=d["id"], name=d["name"], lat=d["lat"], lon=d["lon"])
+                for d in cached
+            ]
+            return self._stations
+
         # NOAA CO-OPS stations list (MDAPI)
         # Returns JSON with stations including lat/lng and id.
         url = "https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json"
@@ -141,6 +154,10 @@ class COOPSTideProvider(EnvProvider):
                 continue
 
         self._stations = out
+        cache_set_json(rk, [
+            {"id": s.id, "name": s.name, "lat": s.lat, "lon": s.lon}
+            for s in out
+        ], settings.ttl_coops_stations)
         return out
 
     def _nearest_station(self, lat: float, lon: float) -> Tuple[Optional[CoopStation], Optional[float]]:
@@ -161,6 +178,22 @@ class COOPSTideProvider(EnvProvider):
         if cache_key in self._tide_cache:
             return self._tide_cache[cache_key]
 
+        # L2: Redis
+        from boat_ride.cache.redis_client import cache_get_json, cache_set_json
+        from boat_ride.cache.keys import coops_tides as _rkey
+        from boat_ride.config import settings
+        rk = _rkey(station_id, begin.strftime("%Y%m%d%H%M"), end.strftime("%Y%m%d%H%M"))
+        cached = cache_get_json(rk)
+        if cached is not None:
+            ts: List[datetime] = []
+            vs: List[float] = cached["vs"]
+            for iso in cached["ts"]:
+                t = datetime.fromisoformat(iso)
+                ts.append(t)
+            meta = cached["meta"]
+            self._tide_cache[cache_key] = (ts, vs, meta)
+            return ts, vs, meta
+
         # CO-OPS Data API endpoint
         url = "https://api.tidesandcurrents.noaa.gov/api/prod/datagetter"
         params = {
@@ -179,7 +212,7 @@ class COOPSTideProvider(EnvProvider):
         r.raise_for_status()
         data = r.json()
 
-        # Data shape depends on product; for predictions it’s usually {"predictions":[{"t":"...","v":"..."}]}
+        # Data shape depends on product; for predictions it's usually {"predictions":[{"t":"...","v":"..."}]}
         rows = data.get("predictions") or data.get("data") or []
         ts: List[datetime] = []
         vs: List[float] = []
@@ -215,6 +248,11 @@ class COOPSTideProvider(EnvProvider):
         }
 
         self._tide_cache[cache_key] = (ts, vs, meta)
+        cache_set_json(rk, {
+            "ts": [t.isoformat() for t in ts],
+            "vs": vs,
+            "meta": meta,
+        }, settings.ttl_coops_tides)
         return ts, vs, meta
 
     # ---------- Provider output ----------

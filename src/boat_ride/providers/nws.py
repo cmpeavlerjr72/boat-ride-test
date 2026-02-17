@@ -131,11 +131,22 @@ class NWSProvider(EnvProvider):
         if key in self._meta_cache:
             return self._meta_cache[key]
 
+        # L2: Redis
+        from boat_ride.cache.redis_client import cache_get_json, cache_set_json
+        from boat_ride.cache.keys import nws_points as _rkey
+        from boat_ride.config import settings
+        rk = _rkey(lat, lon)
+        cached = cache_get_json(rk)
+        if cached is not None:
+            self._meta_cache[key] = cached
+            return cached
+
         url = f"https://api.weather.gov/points/{lat},{lon}"
         data = self._get_json(url, timeout=20, tries=4, backoff_s=0.8)
 
         props = data["properties"]
         self._meta_cache[key] = props
+        cache_set_json(rk, props, settings.ttl_nws_points)
         return props
 
     # ---------- Hourly forecast path ----------
@@ -143,6 +154,26 @@ class NWSProvider(EnvProvider):
     def _hourly_periods(self, forecast_hourly_url: str) -> list[_HourlyPeriod]:
         if forecast_hourly_url in self._hourly_cache:
             return self._hourly_cache[forecast_hourly_url]
+
+        # L2: Redis
+        from boat_ride.cache.redis_client import cache_get_json, cache_set_json
+        from boat_ride.cache.keys import nws_hourly as _rkey
+        from boat_ride.config import settings
+        rk = _rkey(forecast_hourly_url)
+        cached = cache_get_json(rk)
+        if cached is not None:
+            periods = [
+                _HourlyPeriod(
+                    start=_parse_iso(d["start"]),
+                    end=_parse_iso(d["end"]),
+                    wind_speed_kt=d.get("wind_speed_kt"),
+                    wind_dir_deg=d.get("wind_dir_deg"),
+                    precip_prob=d.get("precip_prob"),
+                )
+                for d in cached
+            ]
+            self._hourly_cache[forecast_hourly_url] = periods
+            return periods
 
         # For hourly we want retries too, but still allow caller fallback on HTTP errors like 404
         r = None
@@ -161,7 +192,6 @@ class NWSProvider(EnvProvider):
         r.raise_for_status()
         data = r.json()
 
-
         periods: list[_HourlyPeriod] = []
         for p in data["properties"]["periods"]:
             start = _parse_iso(p["startTime"])
@@ -179,6 +209,17 @@ class NWSProvider(EnvProvider):
             periods.append(_HourlyPeriod(start, end, ws, wd, pop_val))
 
         self._hourly_cache[forecast_hourly_url] = periods
+        # Serialize for Redis
+        cache_set_json(rk, [
+            {
+                "start": hp.start.isoformat(),
+                "end": hp.end.isoformat(),
+                "wind_speed_kt": hp.wind_speed_kt,
+                "wind_dir_deg": hp.wind_dir_deg,
+                "precip_prob": hp.precip_prob,
+            }
+            for hp in periods
+        ], settings.ttl_nws_hourly)
         return periods
 
     def _pick_hourly(self, periods: list[_HourlyPeriod], t_local: datetime) -> Optional[_HourlyPeriod]:
@@ -201,9 +242,21 @@ class NWSProvider(EnvProvider):
     def _grid_json(self, forecast_grid_url: str) -> dict:
         if forecast_grid_url in self._grid_cache:
             return self._grid_cache[forecast_grid_url]
+
+        # L2: Redis
+        from boat_ride.cache.redis_client import cache_get_json, cache_set_json
+        from boat_ride.cache.keys import nws_grid as _rkey
+        from boat_ride.config import settings
+        rk = _rkey(forecast_grid_url)
+        cached = cache_get_json(rk)
+        if cached is not None:
+            self._grid_cache[forecast_grid_url] = cached
+            return cached
+
         data = self._get_json(forecast_grid_url, timeout=20, tries=4, backoff_s=0.8)
 
         self._grid_cache[forecast_grid_url] = data
+        cache_set_json(rk, data, settings.ttl_nws_grid)
         return data
 
     def _parse_valid_time_start(self, valid_time: str) -> Optional[datetime]:

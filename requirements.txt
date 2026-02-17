@@ -8,3 +8,4 @@ requests>=2.31
 shapely>=2.0
 pyshp>=2.3
 rich>=13.0
+redis>=5.0

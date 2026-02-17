@@ -1,6 +1,8 @@
 """FastAPI REST backend for the boat-ride scoring engine."""
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -11,6 +13,8 @@ from boat_ride.core.engine import run_engine
 from boat_ride.core.models import BoatProfile, RideScore, TripPlan
 from boat_ride.providers.combined import build_provider
 
+log = logging.getLogger(__name__)
+
 app = FastAPI(title="Boat Ride", version="0.1.0")
 
 app.add_middleware(
@@ -19,6 +23,42 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ---------------------------------------------------------------------------
+# Module-level provider singletons (L1 caches persist across requests)
+# ---------------------------------------------------------------------------
+_provider_cache: Dict[str, Any] = {}
+
+
+def _get_provider(provider_str: str):
+    if provider_str not in _provider_cache:
+        _provider_cache[provider_str] = build_provider(provider_str)
+    return _provider_cache[provider_str]
+
+
+# ---------------------------------------------------------------------------
+# Area tracking — record route bounding boxes for the background worker
+# ---------------------------------------------------------------------------
+
+def _record_active_area(route_points: list) -> None:
+    """Write route bounding box to Redis sorted set so the worker knows
+    which areas are actively queried by users."""
+    try:
+        from boat_ride.cache.redis_client import get_redis
+        from boat_ride.cache.keys import worker_active_areas
+
+        r = get_redis()
+        if r is None:
+            return
+
+        lats = [rp.lat for rp in route_points]
+        lons = [rp.lon for rp in route_points]
+        area_key = f"{min(lats):.2f},{min(lons):.2f},{max(lats):.2f},{max(lons):.2f}"
+        # Score = current unix time so the worker can expire stale areas
+        r.zadd(worker_active_areas(), {area_key: time.time()})
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +104,16 @@ class ScoreRouteResponse(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    redis_ok = False
+    try:
+        from boat_ride.cache.redis_client import get_redis
+        r = get_redis()
+        if r is not None:
+            r.ping()
+            redis_ok = True
+    except Exception:
+        pass
+    return {"status": "ok", "redis": redis_ok}
 
 
 @app.post("/score-route", response_model=ScoreRouteResponse)
@@ -80,7 +129,7 @@ def score_route(req: ScoreRouteRequest):
             timezone=req.timezone,
         )
 
-        provider = build_provider(req.provider)
+        provider = _get_provider(req.provider)
         raw_scores: list[RideScore] = run_engine(plan, provider)
         raw_scores.sort(key=lambda s: s.t_local)
 
@@ -96,6 +145,9 @@ def score_route(req: ScoreRouteRequest):
             )
             for s in raw_scores
         ]
+
+        # Record this area for the background worker (fire-and-forget)
+        _record_active_area(req.route)
 
         return ScoreRouteResponse(scores=scores)
 

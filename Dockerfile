@@ -18,4 +18,4 @@ RUN python -c "from boat_ride.geo.shoreline import ShorelineData; ShorelineData.
 
 EXPOSE 10000
 
-CMD ["gunicorn", "boat_ride.api:app", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:10000", "--timeout", "120"]
+CMD sh -c "gunicorn boat_ride.api:app --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:10000 --timeout 120 --workers ${BOAT_RIDE_GUNICORN_WORKERS:-2}"
