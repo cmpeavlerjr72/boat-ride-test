@@ -10,6 +10,11 @@ class Settings(BaseSettings):
     # Redis — empty string means disabled (graceful fallback)
     redis_url: str = ""
 
+    # Supabase — empty strings mean disabled (graceful fallback)
+    supabase_url: str = ""
+    supabase_service_key: str = ""
+    supabase_jwt_secret: str = ""
+
     # TTL values in seconds for each cached data type
     ttl_nws_points: int = 86400       # 24 h — NWS /points metadata rarely changes
     ttl_nws_hourly: int = 3600        # 1 h — hourly forecast

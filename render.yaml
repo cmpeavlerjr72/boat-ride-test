@@ -10,6 +10,12 @@ services:
           name: boat-ride-redis
           type: keyvalue
           property: connectionString
+      - key: BOAT_RIDE_SUPABASE_URL
+        sync: false
+      - key: BOAT_RIDE_SUPABASE_SERVICE_KEY
+        sync: false
+      - key: BOAT_RIDE_SUPABASE_JWT_SECRET
+        sync: false
 
   - type: worker
     name: boat-ride-worker
@@ -22,6 +28,12 @@ services:
           name: boat-ride-redis
           type: keyvalue
           property: connectionString
+      - key: BOAT_RIDE_SUPABASE_URL
+        sync: false
+      - key: BOAT_RIDE_SUPABASE_SERVICE_KEY
+        sync: false
+      - key: BOAT_RIDE_SUPABASE_JWT_SECRET
+        sync: false
 
   - type: keyvalue
     name: boat-ride-redis

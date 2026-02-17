@@ -3,7 +3,7 @@ from __future__ import annotations
 from math import tanh
 from typing import Any, Dict, List, Optional
 
-from boat_ride.core.models import BoatProfile, EnvAtPoint, RideScore
+from boat_ride.core.models import BoatProfile, EnvAtPoint, RideScore, ScoringPreferences
 
 
 def _deepwater_wavelength_m(period_s: float) -> Optional[float]:
@@ -117,9 +117,17 @@ def _tide_wind_opposition_penalty(
 
 
 
-def score_point(boat: BoatProfile, env: EnvAtPoint) -> RideScore:
+def score_point(
+    boat: BoatProfile,
+    env: EnvAtPoint,
+    prefs: Optional[ScoringPreferences] = None,
+) -> RideScore:
     reasons: List[str] = []
     detail: Dict[str, Any] = {}
+
+    # Default preferences (all 1.0 multipliers, 0.0 offset)
+    if prefs is None:
+        prefs = ScoringPreferences()
 
     wind = float(getattr(env, "wind_speed_kt", None) or 0.0)
     pop = float(getattr(env, "precip_prob", None) or 0.0)
@@ -156,32 +164,32 @@ def score_point(boat: BoatProfile, env: EnvAtPoint) -> RideScore:
     # Wind penalty (base)
     if wind > 0:
         wind_ratio = wind / max(1.0, boat.max_safe_wind_kt)
-        score -= 35.0 * (wind_ratio ** 1.3)
+        score -= 35.0 * (wind_ratio ** 1.3) * prefs.wind_multiplier
         if wind_ratio > 1.0:
             reasons.append(f"Wind {wind:.0f} kt above comfort limit")
 
     # Gust penalty (optional)
     if gust is not None and gust > wind and gust > 0:
         gust_excess = gust - wind
-        # Scale “excess gustiness” relative to boat’s wind limit
+        # Scale "excess gustiness" relative to boat's wind limit
         gust_ratio = gust_excess / max(1.0, 0.35 * boat.max_safe_wind_kt)
-        score -= 10.0 * (gust_ratio ** 1.2)
+        score -= 10.0 * (gust_ratio ** 1.2) * prefs.wind_multiplier
         if gust_excess >= 8:
             reasons.append(f"Gusty (+{gust_excess:.0f} kt)")
 
     # Wave height penalty (base)
     if wave > 0:
         wave_ratio = wave / max(0.5, boat.max_safe_wave_ft)
-        score -= 50.0 * (wave_ratio ** 1.4)
+        score -= 50.0 * (wave_ratio ** 1.4) * prefs.wave_multiplier
         if wave_ratio > 1.0:
             reasons.append(f"Seas {wave:.1f} ft above comfort limit")
 
     # Short-period penalty (optional)
     if wave > 0 and wave_period is not None and wave_period > 0:
-        # Comfortable: ~8–10s. Below ~6s becomes “punchy” quickly.
+        # Comfortable: ~8–10s. Below ~6s becomes "punchy" quickly.
         if wave_period < 8.0:
             shortness = (8.0 - wave_period) / 4.0  # 4s -> 1.0, 8s -> 0
-            score -= 12.0 * (shortness ** 1.4)
+            score -= 12.0 * (shortness ** 1.4) * prefs.period_multiplier
             if wave_period <= 6.0:
                 reasons.append(f"Short period seas ({wave_period:.0f}s)")
 
@@ -190,7 +198,7 @@ def score_point(boat: BoatProfile, env: EnvAtPoint) -> RideScore:
         # Typical deep-water steepness: ~0.01 gentle; >0.03 steep
         if steepness > 0.02:
             s = (steepness - 0.02) / 0.02  # 0.04 => 1.0
-            score -= 14.0 * (s ** 1.2)
+            score -= 14.0 * (s ** 1.2) * prefs.chop_multiplier
             if steepness >= 0.03:
                 reasons.append("Steep seas")
 
@@ -199,7 +207,7 @@ def score_point(boat: BoatProfile, env: EnvAtPoint) -> RideScore:
         # If wind is against wave direction, seas steepen / chop increases.
         d = _angle_diff_deg(wind_dir, wave_dir)  # 0 aligned, 180 opposed
         opposition = max(0.0, (d - 90.0) / 90.0)  # 0 until 90°, 1 at 180°
-        score -= 10.0 * opposition * min(1.0, wind / max(1.0, boat.max_safe_wind_kt))
+        score -= 10.0 * opposition * min(1.0, wind / max(1.0, boat.max_safe_wind_kt)) * prefs.chop_multiplier
         if d >= 140:
             reasons.append("Wind against seas")
 
@@ -213,7 +221,7 @@ def score_point(boat: BoatProfile, env: EnvAtPoint) -> RideScore:
         if rate > 0.3:
             # Normalize: 0 at 0.3, 1 at ~1.5
             r = min(1.0, (rate - 0.3) / 1.2)
-            score -= 8.0 * (r ** 1.3)
+            score -= 8.0 * (r ** 1.3) * prefs.tide_multiplier
 
             if rate >= 1.0:
                 reasons.append("Strong tidal flow")
@@ -229,18 +237,21 @@ def score_point(boat: BoatProfile, env: EnvAtPoint) -> RideScore:
             )
             if tw is not None:
                 pen, why = tw
-                score -= pen
+                score -= pen * prefs.tide_multiplier
                 reasons.append(why)
 
 
     # Precip penalty
     if pop > 0:
-        score -= 15.0 * pop
+        score -= 15.0 * pop * prefs.precip_multiplier
         if pop >= 0.6:
             reasons.append(f"High rain chance ({int(pop * 100)}%)")
 
     # Comfort bias tweak
     score += boat.comfort_bias * 8.0
+
+    # Apply overall offset from personalized preferences
+    score += prefs.overall_offset
 
     # Clamp
     score = max(0.0, min(100.0, score))

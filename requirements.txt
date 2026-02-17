@@ -9,3 +9,6 @@ shapely>=2.0
 pyshp>=2.3
 rich>=13.0
 redis>=5.0
+PyJWT>=2.8
+cryptography>=41.0
+supabase>=2.0

@@ -5,13 +5,16 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from boat_ride.auth import get_optional_user
 from boat_ride.core.engine import run_engine
-from boat_ride.core.models import BoatProfile, RideScore, TripPlan
+from boat_ride.core.models import BoatProfile, RideScore, ScoringPreferences, TripPlan
+from boat_ride.db import get_supabase
 from boat_ride.providers.combined import build_provider
+from boat_ride.routers import boats, profiles, reports, routes, scoring_feedback
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +26,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ---------------------------------------------------------------------------
+# Include routers
+# ---------------------------------------------------------------------------
+app.include_router(profiles.router)
+app.include_router(boats.router)
+app.include_router(routes.router)
+app.include_router(reports.router)
+app.include_router(scoring_feedback.router)
 
 
 # ---------------------------------------------------------------------------
@@ -113,11 +125,47 @@ def health():
             redis_ok = True
     except Exception:
         pass
-    return {"status": "ok", "redis": redis_ok}
+
+    supabase_ok = get_supabase() is not None
+
+    return {"status": "ok", "redis": redis_ok, "supabase": supabase_ok}
+
+
+def _load_user_prefs(user_id: Optional[str]) -> Optional[ScoringPreferences]:
+    """Load scoring preferences for an authenticated user, or return None."""
+    if not user_id:
+        return None
+    try:
+        sb = get_supabase()
+        if sb is None:
+            return None
+        resp = (
+            sb.table("scoring_preferences")
+            .select("*")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        if resp.data:
+            row = resp.data[0]
+            return ScoringPreferences(
+                wind_multiplier=row.get("wind_multiplier", 1.0),
+                wave_multiplier=row.get("wave_multiplier", 1.0),
+                period_multiplier=row.get("period_multiplier", 1.0),
+                chop_multiplier=row.get("chop_multiplier", 1.0),
+                precip_multiplier=row.get("precip_multiplier", 1.0),
+                tide_multiplier=row.get("tide_multiplier", 1.0),
+                overall_offset=row.get("overall_offset", 0.0),
+            )
+    except Exception:
+        pass
+    return None
 
 
 @app.post("/score-route", response_model=ScoreRouteResponse)
-def score_route(req: ScoreRouteRequest):
+def score_route(
+    req: ScoreRouteRequest,
+    user_id: Optional[str] = Depends(get_optional_user),
+):
     try:
         plan = TripPlan(
             trip_id="api",
@@ -129,8 +177,11 @@ def score_route(req: ScoreRouteRequest):
             timezone=req.timezone,
         )
 
+        # Load personalized scoring preferences if user is authenticated
+        prefs = _load_user_prefs(user_id)
+
         provider = _get_provider(req.provider)
-        raw_scores: list[RideScore] = run_engine(plan, provider)
+        raw_scores: list[RideScore] = run_engine(plan, provider, prefs=prefs)
         raw_scores.sort(key=lambda s: s.t_local)
 
         scores = [

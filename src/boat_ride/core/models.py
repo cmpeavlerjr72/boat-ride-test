@@ -135,6 +135,17 @@ class TripPlan(BaseModel):
         return out
 
 
+class ScoringPreferences(BaseModel):
+    """Per-user sensitivity multipliers for personalized scoring."""
+    wind_multiplier: float = Field(default=1.0, ge=0.2, le=3.0)
+    wave_multiplier: float = Field(default=1.0, ge=0.2, le=3.0)
+    period_multiplier: float = Field(default=1.0, ge=0.2, le=3.0)
+    chop_multiplier: float = Field(default=1.0, ge=0.2, le=3.0)
+    precip_multiplier: float = Field(default=1.0, ge=0.2, le=3.0)
+    tide_multiplier: float = Field(default=1.0, ge=0.2, le=3.0)
+    overall_offset: float = Field(default=0.0, ge=-20.0, le=20.0)
+
+
 class EnvAtPoint(BaseModel):
     t_local: str
     lat: float
