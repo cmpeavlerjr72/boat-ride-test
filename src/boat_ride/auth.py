@@ -60,17 +60,23 @@ def _decode_token(token: str) -> dict:
                 algorithms=["ES256", "RS256", "EdDSA"],
                 audience="authenticated",
             )
-        except (jwt.exceptions.PyJWKClientError, jwt.exceptions.DecodeError):
-            # JWKS fetch or key-match failed — fall through to HS256
-            pass
+        except Exception as exc:
+            # Log the JWKS failure so we can diagnose — then fall through
+            log.warning("JWKS verification failed (%s: %s), trying HS256 fallback",
+                        type(exc).__name__, exc)
+    else:
+        log.warning("JWKS client not available (supabase_url=%r)", settings.supabase_url)
 
     # --- Fallback: HS256 with shared secret ---
-    return jwt.decode(
-        token,
-        settings.supabase_jwt_secret,
-        algorithms=["HS256"],
-        audience="authenticated",
-    )
+    if settings.supabase_jwt_secret:
+        return jwt.decode(
+            token,
+            settings.supabase_jwt_secret,
+            algorithms=["HS256"],
+            audience="authenticated",
+        )
+
+    raise jwt.InvalidTokenError("No verification method available (JWKS failed, no HS256 secret)")
 
 
 async def get_current_user(request: Request) -> str:
