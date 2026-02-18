@@ -93,6 +93,7 @@ class ScoreRouteRequest(BaseModel):
     sample_every_minutes: int = 20
     boat: Optional[BoatProfile] = None
     provider: str = "nws+ndbc+fetch+coops"
+    water_type: str = "auto"  # "auto" | "lake" | "tidal"
 
 
 class ScoreOut(BaseModel):
@@ -108,6 +109,7 @@ class ScoreOut(BaseModel):
 class ScoreRouteResponse(BaseModel):
     scores: List[ScoreOut]
     trip_id: str = "api"
+    water_type_used: str = "tidal"  # "lake" | "tidal"
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +163,44 @@ def _load_user_prefs(user_id: Optional[str]) -> Optional[ScoringPreferences]:
     return None
 
 
+def _resolve_water_type(
+    water_type: str, provider_str: str, route: List[RoutePointIn]
+) -> tuple:
+    """Resolve water_type into a (provider_str, water_type_used) tuple.
+
+    - "lake": strip coops/tide tokens from provider string
+    - "tidal": keep provider string as-is
+    - "auto": check distance to nearest CO-OPS station; >25 nm → lake
+    """
+    wt = water_type.lower().strip()
+
+    if wt == "lake":
+        tokens = [t for t in provider_str.split("+") if t.strip().lower() not in ("coops", "tide")]
+        return "+".join(tokens) or provider_str, "lake"
+
+    if wt == "tidal":
+        return provider_str, "tidal"
+
+    # auto-detect using CO-OPS station proximity
+    if route:
+        lat0 = sum(rp.lat for rp in route) / len(route)
+        lon0 = sum(rp.lon for rp in route) / len(route)
+    else:
+        return provider_str, "tidal"
+
+    try:
+        from boat_ride.providers.coops import COOPSTideProvider
+        coops = COOPSTideProvider()
+        _station, dist_nm = coops._nearest_station(lat0, lon0)
+        if _station is None or (dist_nm is not None and dist_nm > 25):
+            tokens = [t for t in provider_str.split("+") if t.strip().lower() not in ("coops", "tide")]
+            return "+".join(tokens) or provider_str, "lake"
+    except Exception:
+        pass
+
+    return provider_str, "tidal"
+
+
 @app.post("/score-route", response_model=ScoreRouteResponse)
 def score_route(
     req: ScoreRouteRequest,
@@ -180,7 +220,10 @@ def score_route(
         # Load personalized scoring preferences if user is authenticated
         prefs = _load_user_prefs(user_id)
 
-        provider = _get_provider(req.provider)
+        resolved_provider_str, water_type_used = _resolve_water_type(
+            req.water_type, req.provider, req.route
+        )
+        provider = _get_provider(resolved_provider_str)
         raw_scores: list[RideScore] = run_engine(plan, provider, prefs=prefs)
         raw_scores.sort(key=lambda s: s.t_local)
 
@@ -200,7 +243,7 @@ def score_route(
         # Record this area for the background worker (fire-and-forget)
         _record_active_area(req.route)
 
-        return ScoreRouteResponse(scores=scores)
+        return ScoreRouteResponse(scores=scores, water_type_used=water_type_used)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
