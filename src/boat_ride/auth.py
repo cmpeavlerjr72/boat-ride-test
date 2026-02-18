@@ -2,6 +2,8 @@
 
 - ``get_current_user``: requires a valid JWT, returns user_id (UUID str).
 - ``get_optional_user``: returns user_id or None (for public endpoints).
+
+Supports both HS256 (legacy) and ES256/JWKS (newer Supabase projects).
 """
 from __future__ import annotations
 
@@ -9,11 +11,27 @@ import logging
 from typing import Optional
 
 import jwt
+from jwt import PyJWKClient
 from fastapi import Depends, HTTPException, Request
 
 from boat_ride.config import settings
 
 log = logging.getLogger(__name__)
+
+# JWKS client — caches keys automatically, only fetches when needed.
+_jwks_client: Optional[PyJWKClient] = None
+
+
+def _get_jwks_client() -> Optional[PyJWKClient]:
+    """Lazily initialise the JWKS client from the Supabase URL."""
+    global _jwks_client
+    if _jwks_client is not None:
+        return _jwks_client
+    if not settings.supabase_url:
+        return None
+    jwks_url = f"{settings.supabase_url}/auth/v1/.well-known/jwks.json"
+    _jwks_client = PyJWKClient(jwks_url, cache_keys=True)
+    return _jwks_client
 
 
 def _extract_token(request: Request) -> Optional[str]:
@@ -25,7 +43,28 @@ def _extract_token(request: Request) -> Optional[str]:
 
 
 def _decode_token(token: str) -> dict:
-    """Decode and verify a Supabase JWT using HS256."""
+    """Decode and verify a Supabase JWT.
+
+    Strategy:
+      1. Try JWKS (ES256/RS256) — works for newer Supabase projects.
+      2. Fall back to HS256 with the shared JWT secret.
+    """
+    # --- Try JWKS first (asymmetric: ES256 / RS256) ---
+    jwks = _get_jwks_client()
+    if jwks is not None:
+        try:
+            signing_key = jwks.get_signing_key_from_jwt(token)
+            return jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=["ES256", "RS256", "EdDSA"],
+                audience="authenticated",
+            )
+        except (jwt.exceptions.PyJWKClientError, jwt.exceptions.DecodeError):
+            # JWKS fetch or key-match failed — fall through to HS256
+            pass
+
+    # --- Fallback: HS256 with shared secret ---
     return jwt.decode(
         token,
         settings.supabase_jwt_secret,
