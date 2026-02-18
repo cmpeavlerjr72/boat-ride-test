@@ -46,6 +46,21 @@ VALUES
      22.25, 8.5, 1.25,
      25, 3.5, 0.0),
 
+    (NULL, true, 'Kenner', '2103',
+     'Kenner 2103', 'bay_boat',
+     21.5, 7.9, 0.9,
+     22, 2.5, -0.1),
+
+    (NULL, true, 'Sea Pro', '248 Bay',
+     'Sea Pro 248 Bay', 'bay_boat',
+     24.67, 8.75, 1.25,
+     25, 3.5, 0.0),
+
+    (NULL, true, 'Pursuit', 'DC 295',
+     'Pursuit DC 295', 'cabin_cruiser',
+     31.75, 9.83, 1.83,
+     32, 5.5, 0.2),
+
     -- ── Pontoons ─────────────────────────────────────────────────────
     (NULL, true, 'Bennington', '22 SSX',
      'Bennington 22 SSX', 'pontoon',
