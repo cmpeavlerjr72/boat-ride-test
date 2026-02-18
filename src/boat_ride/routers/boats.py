@@ -17,6 +17,8 @@ class BoatOut(BaseModel):
     user_id: Optional[str] = None
     is_preset: bool = False
     name: str
+    make: Optional[str] = None
+    model: Optional[str] = None
     boat_type: Optional[str] = None
     length_ft: Optional[float] = None
     beam_ft: Optional[float] = None
@@ -28,6 +30,8 @@ class BoatOut(BaseModel):
 
 class BoatCreate(BaseModel):
     name: str
+    make: Optional[str] = None
+    model: Optional[str] = None
     boat_type: str = "other"
     length_ft: Optional[float] = None
     beam_ft: Optional[float] = None
@@ -39,6 +43,8 @@ class BoatCreate(BaseModel):
 
 class BoatUpdate(BaseModel):
     name: Optional[str] = None
+    make: Optional[str] = None
+    model: Optional[str] = None
     boat_type: Optional[str] = None
     length_ft: Optional[float] = None
     beam_ft: Optional[float] = None
