@@ -1,4 +1,4 @@
-"""User profile endpoints: GET /profiles/me, PUT /profiles/me."""
+"""User profile endpoints: GET /profiles/me, PUT /profiles/me, DELETE /account/me."""
 from __future__ import annotations
 
 from typing import Optional
@@ -63,3 +63,14 @@ def update_my_profile(
     if not resp.data:
         raise HTTPException(status_code=404, detail="Profile not found")
     return resp.data[0]
+
+
+@router.delete("/account/me", status_code=204)
+def delete_my_account(user_id: str = Depends(get_current_user)):
+    """Permanently delete the authenticated user's account and all associated data."""
+    sb = get_supabase()
+    if sb is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    sb.auth.admin.delete_user(user_id)
+    return None
